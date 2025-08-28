@@ -1,0 +1,146 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Organization {
+  id        String  @id @default(cuid())
+  name      String
+  orgType   OrgType
+  createdAt DateTime @default(now())
+  users     Membership[]
+}
+
+enum OrgType { CATERPILLAR DEALER CUSTOMER }
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  passkeyId String?  // WebAuthn optional
+  createdAt DateTime @default(now())
+  memberships Membership[]
+}
+
+model Membership {
+  id        String @id @default(cuid())
+  userId    String
+  orgId     String
+  role      Role
+  user      User        @relation(fields: [userId], references: [id])
+  org       Organization @relation(fields: [orgId], references: [id])
+  @@unique([userId, orgId])
+}
+
+enum Role { CAT_ADMIN DEALER_ADMIN DEALER_DISPATCH CUSTOMER_SUPERVISOR OPERATOR }
+
+model Site {
+  id        String  @id @default(cuid())
+  name      String
+  customerId String  // Organization.id where orgType = CUSTOMER
+  dealerId   String  // Organization.id where orgType = DEALER (servicing dealer)
+  geofence   Json?   // GeoJSON; also add PostGIS geometry via migration
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  assets     Equipment[]
+  @@index([customerId, dealerId])
+}
+
+model Equipment {
+  id         String @id @default(cuid())
+  humanId    String @unique // EQX1004
+  type       String
+  serial     String?
+  status     EquipStatus @default(AVAILABLE)
+  siteId     String?
+  site       Site? @relation(fields: [siteId], references: [id])
+  dealerId   String // owning dealer orgId
+  customerId String? // if assigned
+  trackerId  String?
+  orgOwnerId String // owning org (dealer by default)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  rentals    Rental[]
+  events     Event[]
+  @@index([dealerId, customerId])
+}
+
+enum EquipStatus { AVAILABLE ON_RENT IDLE MAINTENANCE LOST }
+
+model Rental {
+  id            String   @id @default(cuid())
+  equipmentId   String
+  siteId        String
+  operatorUserId String
+  checkoutAt    DateTime
+  dueAt         DateTime
+  checkinAt     DateTime?
+  expectedHours Float?
+  totalRuntimeHours Float?
+  totalIdleHours    Float?
+  dealerId   String
+  customerId String
+  orgOwnerId String
+  equipment  Equipment @relation(fields:[equipmentId], references:[id])
+  site       Site      @relation(fields:[siteId], references:[id])
+}
+
+model UsageDaily {
+  id          String  @id @default(cuid())
+  equipmentId String
+  date        DateTime
+  runtimeH    Float @default(0)
+  idleH       Float @default(0)
+  fuelL       Float? @default(0)
+  location    Json?
+  source      String // scan | telemetry
+  dealerId    String
+  customerId  String?
+  orgOwnerId  String
+  @@unique([equipmentId, date])
+}
+
+model Maintenance {
+  id          String  @id @default(cuid())
+  equipmentId String
+  type        String
+  openedAt    DateTime @default(now())
+  closedAt    DateTime?
+  notes       String?
+  dealerId    String
+  customerId  String?
+  orgOwnerId  String
+}
+
+model Event {
+  id          String  @id @default(cuid())
+  equipmentId String
+  ts          DateTime @default(now())
+  kind        String   // checkout, checkin, move, alert, photo, suggestion
+  actorUserId String?
+  payload     Json
+  prevHash    String?
+  selfHash    String
+  dealerId    String?
+  customerId  String?
+  orgOwnerId  String
+}
+
+model Forecast {
+  id            String  @id @default(cuid())
+  siteId        String
+  equipmentType String
+  day           DateTime
+  demandPred    Float
+  p10           Float?
+  p90           Float?
+  suggestion    Json?  // e.g., {moves:[{from,to,qty,date,score,explanation}]}
+  dealerId      String
+  customerId    String?
+  orgOwnerId    String
+  @@unique([siteId, equipmentType, day])
+}
